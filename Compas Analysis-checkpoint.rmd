@@ -1,0 +1,532 @@
+---
+output:
+  pdf_document: default
+  word_document: default
+  html_document: default
+---
+Module Name : STD-0920B - NICF Statistical Thinking for Data Science and Analytics(SF)
+Project : Predicting Recidivism applying IRAC method
+
+Name : Tang Tiong Siu (S2606169E)
+Date : 27the January 2021
+
+Compas Analysis
+
+Tools used : RStudio Version 1.1.456
+
+Loading the Data
+We select fields for severity of charge, number of priors, demographics, age, sex, compas scores, and whether each person was accused of a crime within two years.
+```{r}
+library(dplyr)
+library(ggplot2)
+raw_data <- read.csv("E:/Lithan/Project/Module4/compas-analysis-master/compas-scores-two-years.csv")
+nrow(raw_data)
+```
+EDA
+Remove rows of missing data:
+
+If the charge date of a defendants Compas scored crime was not within 30 days from when the person was arrested, we assume that because of data quality reasons, that we do not have the right offense.
+We coded the recidivist flag -- is_recid -- to be -1 if we could not find a compas case at all.
+In a similar vein, ordinary traffic offenses -- those with a c_charge_degree of 'O' -- will not result in Jail time are removed (only two of them).
+We filtered the underlying data from Broward county to include only those rows representing people who had either recidivated in two years, or had at least two years outside of a correctional facility.
+```{r}
+df <- dplyr::select(raw_data, age, c_charge_degree, race, age_cat, score_text, sex, priors_count, 
+                    days_b_screening_arrest, decile_score, is_recid, two_year_recid, c_jail_in, c_jail_out) %>% 
+        filter(days_b_screening_arrest <= 30) %>%
+        filter(days_b_screening_arrest >= -30) %>%
+        filter(is_recid != -1) %>%
+        filter(c_charge_degree != "O") %>%
+        filter(score_text != 'N/A')
+nrow(df)
+```
+Analyse variable Correlation
+```{r}
+df$length_of_stay <- as.numeric(as.Date(df$c_jail_out) - as.Date(df$c_jail_in))
+cor(df$length_of_stay, df$decile_score)
+```
+```{r}
+summary(as.factor(df$age_cat))
+```
+```{r}
+summary(as.factor(df$race))
+```
+```{python}
+print("Black defendants: %.2f%%" %          (3175 / 6172 * 100))
+print("White defendants: %.2f%%" %           (2103 / 6172 * 100))
+print("Hispanic defendants: %.2f%%" %        (509  / 6172 * 100))
+print("Asian defendants: %.2f%%"  %     (31   / 6172 * 100))
+print("Native American defendants: %.2f%%" %  (11   / 6172 * 100))
+
+```
+
+```{r}
+summary(as.factor(df$score_text))
+```
+```{r}
+xtabs(~ sex + race, data=df)
+```
+```{r}
+summary(as.factor(df$sex))
+```
+```{r}
+print("Men: %.2f%%"   <- (4997 / 6172 * 100))
+print("Women: %.2f%%"  <- (1175 / 6172 * 100))
+```
+```{r}
+nrow(filter(df, two_year_recid == 1))
+```
+```{r}
+nrow(filter(df, two_year_recid == 1)) / nrow(df) * 100
+```
+```{r}
+library(grid)
+library(gridExtra)
+pblack <- ggplot(data=filter(df, race =="African-American"), aes(ordered(decile_score))) + 
+          geom_bar() + xlab("Decile Score") +
+          ylim(0, 650) + ggtitle("Black Defendant's Decile Scores")
+pwhite <- ggplot(data=filter(df, race =="Caucasian"), aes(ordered(decile_score))) + 
+          geom_bar() + xlab("Decile Score") +
+          ylim(0, 650) + ggtitle("White Defendant's Decile Scores")
+grid.arrange(pblack, pwhite,  ncol = 2)
+```
+```{r}
+xtabs(~ decile_score + race, data=df)
+```
+```{r}
+df <- mutate(df, crime_factor = factor(c_charge_degree)) %>%
+      mutate(age_factor = as.factor(age_cat)) %>%
+      within(age_factor <- relevel(age_factor, ref = 1)) %>%
+      mutate(race_factor = factor(race)) %>%
+      within(race_factor <- relevel(race_factor, ref = 3)) %>%
+      mutate(gender_factor = factor(sex, labels= c("Female","Male"))) %>%
+      within(gender_factor <- relevel(gender_factor, ref = 2)) %>%
+      mutate(score_factor = factor(score_text != "Low", labels = c("LowScore","HighScore")))
+model <- glm(score_factor ~ gender_factor + age_factor + race_factor +
+                            priors_count + crime_factor + two_year_recid, family="binomial", data=df)
+summary(model)
+```
+```{r}
+control <- exp(-1.52554) / (1 + exp(-1.52554))
+exp(0.47721) / (1 - control + (control * exp(0.47721)))
+```
+```{r}
+exp(0.22127) / (1 - control + (control * exp(0.22127)))
+```
+```{r}
+exp(1.30839) / (1 - control + (control * exp(1.30839)))
+```
+
+### Risk of Violent Recidivism
+
+Compas also offers a score that aims to measure a persons risk of violent recidivism, which has a similar overall accuracy to the Recidivism score. As before, we can use a logistic regression to test for racial bias.
+
+```{r}
+raw_data <- read.csv("E:/Lithan/Project/Module4/compas-analysis-master/compas-scores-two-years-violent.csv")
+nrow(raw_data)
+```
+```{r}
+df <- dplyr::select(raw_data, age, c_charge_degree, race, age_cat, v_score_text, sex, priors_count, 
+                    days_b_screening_arrest, v_decile_score, is_recid, two_year_recid) %>% 
+        filter(days_b_screening_arrest <= 30) %>%
+        filter(days_b_screening_arrest >= -30) %>% 
+        filter(is_recid != -1) %>%
+        filter(c_charge_degree != "O") %>%
+        filter(v_score_text != 'N/A')
+nrow(df)
+```
+```{r}
+summary(as.factor(df$age_cat))
+```
+```{r}
+summary(as.factor(df$race))
+```
+```{r}
+summary(as.factor(df$v_score_text))
+```
+```{r}
+nrow(filter(df, two_year_recid == 1)) / nrow(df) * 100
+```
+```{r}
+nrow(filter(df, two_year_recid == 1))
+```
+```{r}
+library(grid)
+library(gridExtra)
+pblack <- ggplot(data=filter(df, race =="African-American"), aes(ordered(v_decile_score))) + 
+          geom_bar() + xlab("Violent Decile Score") +
+          ylim(0, 700) + ggtitle("Black Defendant's Violent Decile Scores")
+pwhite <- ggplot(data=filter(df, race =="Caucasian"), aes(ordered(v_decile_score))) + 
+          geom_bar() + xlab("Violent Decile Score") +
+          ylim(0, 700) + ggtitle("White Defendant's Violent Decile Scores")
+grid.arrange(pblack, pwhite,  ncol = 2)
+```
+```{r}
+df <- mutate(df, crime_factor = factor(c_charge_degree)) %>%
+      mutate(age_factor = as.factor(age_cat)) %>%
+      within(age_factor <- relevel(age_factor, ref = 1)) %>%
+      mutate(race_factor = factor(race,
+                                  labels = c("African-American", 
+                                             "Asian",
+                                             "Caucasian", 
+                                             "Hispanic", 
+                                             "Native American",
+                                             "Other"))) %>%
+      within(race_factor <- relevel(race_factor, ref = 3)) %>%
+      mutate(gender_factor = factor(sex, labels= c("Female","Male"))) %>%
+      within(gender_factor <- relevel(gender_factor, ref = 2)) %>%
+      mutate(score_factor = factor(v_score_text != "Low", labels = c("LowScore","HighScore")))
+model <- glm(score_factor ~ gender_factor + age_factor + race_factor +
+                            priors_count + crime_factor + two_year_recid, family="binomial", data=df)
+summary(model)
+```
+```{r}
+control <- exp(-2.24274) / (1 + exp(-2.24274))
+exp(0.65893) / (1 - control + (control * exp(0.65893)))
+```
+```{r}
+exp(3.14591) / (1 - control + (control * exp(3.14591)))
+```
+Predictive Accuracy of COMPAS
+In order to test whether Compas scores do an accurate job of deciding whether an offender is Low, Medium or High risk, we ran a Cox Proportional Hazards model. Northpointe, the company that created COMPAS and markets it to Law Enforcement, also ran a Cox model in their validation study.
+
+We used the counting model and removed people when they were incarcerated. Due to errors in the underlying jail data, we need to filter out 32 rows that have an end date more than the start date. Considering that there are 13,334 total rows in the data, such a small amount of errors will not affect the results.
+
+```{r}
+library(survival)
+library(ggfortify)
+
+data <- filter(filter(read.csv("E:/Lithan/Project/Module4/compas-analysis-master/cox-parsed.csv"), score_text != "N/A"), end > start) %>%
+        mutate(race_factor = factor(race,
+                                  labels = c("African-American", 
+                                             "Asian",
+                                             "Caucasian", 
+                                             "Hispanic", 
+                                             "Native American",
+                                             "Other"))) %>%
+        within(race_factor <- relevel(race_factor, ref = 3)) %>%
+        mutate(score_factor = factor(score_text)) %>%
+        within(score_factor <- relevel(score_factor, ref=2))
+
+grp <- data[!duplicated(data$id),]
+nrow(grp)
+```
+```{r}
+summary(as.factor(grp$score_factor))
+```
+```{r}
+summary(as.factor(grp$race_factor))
+```
+```{r}
+f <- Surv(start, end, event, type="counting") ~ score_factor
+model <- coxph(f, data=data)
+summary(model)
+```
+```{r}
+decile_f <- Surv(start, end, event, type="counting") ~ decile_score
+dmodel <- coxph(decile_f, data=data)
+summary(dmodel)
+```
+COMPAS's decile scores are a bit more accurate at 66%.
+
+We can test if the algorithm is behaving differently across races by including a race interaction term in the cox model.
+
+```{r}
+f2 <- Surv(start, end, event, type="counting") ~ race_factor + score_factor + race_factor * score_factor
+model <- coxph(f2, data=data)
+print(summary(model))
+```
+
+```{python}
+import math
+print("Black High Hazard: %.2f" % (math.exp(-0.18976 + 1.28350)))
+print("White High Hazard: %.2f" % (math.exp(1.28350)))
+print("Black Medium Hazard: %.2f" % (math.exp(0.84286-0.17261)))
+print("White Medium Hazard: %.2f" % (math.exp(0.84286)))
+```
+
+```{R}
+fit <- survfit(f, data=data)
+
+plotty <- function(fit, title) {
+  return(autoplot(fit, conf.int=T, censor=F) + ggtitle(title) + ylim(0,1))
+}
+plotty(fit, "Overall")
+```
+Black defendants do recidivate at higher rates according to race specific Kaplan Meier plots.
+
+```{r}
+white <- filter(data, race == "Caucasian")
+white_fit <- survfit(f, data=white)
+
+black <- filter(data, race == "African-American")
+black_fit <- survfit(f, data=black)
+
+grid.arrange(plotty(white_fit, "White defendants"), 
+             plotty(black_fit, "Black defendants"), ncol=2)
+```
+```{r}
+summary(fit, times=c(730))
+```
+```{r}
+summary(black_fit, times=c(730))
+```
+```{r}
+summary(white_fit, times=c(730))
+```
+Race specific models have similar concordance values.
+```{r}
+summary(coxph(f, data=white))
+```
+```{r}
+summary(coxph(f, data=black))
+```
+Compas's violent recidivism score has a slightly higher overall concordance score of 65.1%.
+```{r}
+violent_data <- filter(filter(read.csv("E:/Lithan/Project/Module4/compas-analysis-master/cox-violent-parsed.csv"), score_text != "N/A"), end > start) %>%
+        mutate(race_factor = factor(race,
+                                  labels = c("African-American", 
+                                             "Asian",
+                                             "Caucasian", 
+                                             "Hispanic", 
+                                             "Native American",
+                                             "Other"))) %>%
+        within(race_factor <- relevel(race_factor, ref = 3)) %>%
+        mutate(score_factor = factor(score_text)) %>%
+        within(score_factor <- relevel(score_factor, ref=2))
+
+
+vf <- Surv(start, end, event, type="counting") ~ score_factor
+vmodel <- coxph(vf, data=violent_data)
+vgrp <- violent_data[!duplicated(violent_data$id),]
+print(nrow(vgrp))
+summary(vmodel)
+```
+In this case, there isn't a significant coefficient on African American's with High Scores.
+```{r}
+vf2 <- Surv(start, end, event, type="counting") ~ race_factor + race_factor * score_factor
+vmodel <- coxph(vf2, data=violent_data)
+summary(vmodel)
+```
+```{r}
+summary(coxph(vf, data=filter(violent_data, race == "African-American")))
+```
+```{r}
+summary(coxph(vf, data=filter(violent_data, race == "Caucasian")))
+```
+```{r}
+white <- filter(violent_data, race == "Caucasian")
+white_fit <- survfit(vf, data=white)
+
+black <- filter(violent_data, race == "African-American")
+black_fit <- survfit(vf, data=black)
+
+grid.arrange(plotty(white_fit, "White defendants"), 
+             plotty(black_fit, "Black defendants"), ncol=2)
+```
+Directions of the Racial Bias
+The above analysis shows that the Compas algorithm does overpredict African-American defendant's future recidivism, but we haven't yet explored the direction of the bias. We can discover fine differences in overprediction and underprediction by comparing Compas scores across racial lines.
+
+```{python}
+from truth_tables import PeekyReader, Person, table, is_race, count, vtable, hightable, vhightable
+from csv import DictReader
+
+people = []
+with open("E:/Lithan/Project/Module4/compas-analysis-master/cox-parsed.csv") as f:
+    reader = PeekyReader(DictReader(f))
+    try:
+        while True:
+            p = Person(reader)
+            if p.valid:
+                people.append(p)
+    except StopIteration:
+        pass
+
+pop = list(filter(lambda i: ((i.recidivist == True and i.lifetime <= 730) or
+                              i.lifetime > 730), list(filter(lambda x: x.score_valid, people))))
+recid = list(filter(lambda i: i.recidivist == True and i.lifetime <= 730, pop))
+rset = set(recid)
+surv = [i for i in pop if i not in rset]
+
+print("Cox Table of All defendants")
+table(list(recid), list(surv))
+print("\nTotal pop: %i" % (2681 + 1282 + 1216 + 2035))
+```
+
+import statistics
+print("\nAverage followup time %.2f (sd %.2f)" % (statistics.mean(map(lambda i: i.lifetime, pop)),
+                                                statistics.stdev(map(lambda i: i.lifetime, pop))))
+print("\nMedian followup time %i" % (statistics.median(map(lambda i: i.lifetime, pop))))
+
+print("\nCox Table of Black defendants")
+is_afam = is_race("African-American")
+table(list(filter(is_afam, recid)), list(filter(is_afam, surv)))
+
+print("\nThat number is higher for African Americans at 44.85 and lower for whites at 23.45")
+
+print("\nCos Table of White defendants")
+is_white = is_race("Caucasian")
+table(list(filter(is_white, recid)), list(filter(is_white, surv)))
+
+bw=44.85 / 23.45
+print("\nBlack to white recidivism ratio :",round(bw,2))
+
+print("\nWhich means, under COMPAS black defendants are 91 percent more likely to get a higher score and not go on to commit more crimes than white defendants after two year")
+print("\nCOMPAS scores misclassify white reoffenders as low risk at 70.4 percent more often than black reoffenders")
+print("\nCox Table of White Defendants")
+hightable(list(filter(is_white, recid)), list(filter(is_white, surv)))
+print("\nCox Table of Black Defendants")
+hightable(list(filter(is_afam, recid)), list(filter(is_afam, surv)))
+
+#Risk of Violent Recidivism
+#Compas also offers a score that aims to measure a persons risk of violent recidivism, which has a similar #overall accuracy to the Recidivism score.
+
+vpeople = []
+with open("E:/Lithan/Project/Module4/compas-analysis-master/cox-violent-parsed.csv") as f:
+    reader = PeekyReader(DictReader(f))
+    try:
+        while True:
+            p = Person(reader)
+            if p.valid:
+                vpeople.append(p)
+    except StopIteration:
+        pass
+
+vpop = list(filter(lambda i: ((i.violent_recidivist == True and i.lifetime <= 730) or
+                              i.lifetime > 730), list(filter(lambda x: x.vscore_valid, vpeople))))
+vrecid = list(filter(lambda i: i.violent_recidivist == True and i.lifetime <= 730, vpeople))
+vrset = set(vrecid)
+vsurv = [i for i in vpop if i not in vrset]
+
+print("\nCox Table of All violent defendants")
+vtable(list(vrecid), list(vsurv))
+
+print("\nCox Table of Violent Black defendants")
+is_afam = is_race("African-American")
+vtable(list(filter(is_afam, vrecid)), list(filter(is_afam, vsurv)))
+
+
+print("\nCox Table of Violent White defendants")
+is_white = is_race("Caucasian")
+vtable(list(filter(is_white, vrecid)), list(filter(is_white, vsurv)))
+
+print('\nCox Score Findings:-')
+print('\nBlack defendants are twice ie. False Positive 38.14 vs 18.46 as likely to be false positives for a Higher violent score than white defendants')
+bw_h=38.14 / 18.46
+print("Black to white higher violent score ratio:", round(bw_h,2))
+
+print('\nWhite defendants are 63% ie.False Negative 38.3 vs 62.62 more likely to get a lower score and commit another crime than Black defendants')
+wb=62.62 / 38.37
+print("White to black ratio:", round(wb,2))
+```
+Gender differences in Compas scores
+In terms of underlying recidivism rates, we can look at gender specific Kaplan Meier estimates. There is a striking difference between women and men.
+
+```{r}
+female <- filter(data, data$sex == "Female")
+male   <- filter(data, data$sex == "Male")
+male_fit <- survfit(f, data=male)
+female_fit <- survfit(f, data=female)
+```
+```{r}
+summary(male_fit, times=c(730))
+```
+
+```{r}
+summary(female_fit, times=c(730))
+```
+```{r}
+grid.arrange(plotty(female_fit, "Female"), plotty(male_fit, "Male"),ncol=2)
+```
+
+Q&A
+
+Question1:
+explain the purpose of loading these library/module before running scripts:
+⦁	Rpy2.python-GOOGLE ABT THIS CODE
+⦁	dplyr
+⦁	ggplot2
+⦁	ggfortify
+
+  Answer1:
+  ⦁	rpy2.python: 
+  	rpy2 is running an embedded R, providing access to it from Python using R's own 	C-API through either: a high-level interface making R functions an 
+  	objects just 	like Python functions and providing a seamless conversion to numpy and pandas 	data structures. a low-level interface closer to the C-API.
+  ⦁	dplyr: 
+    dplyr is a data manipulation package for R
+  ⦁	ggplot2: 
+  	ggplot2 is a data visualisation package for R. it declaratively creates graphics 	based on R syntax and functions. 
+  ⦁	ggfortify: 
+  	ggfortify extends ggplot2 for plotting some popular R packages using a 	standardized approach, included in the function autoplot().
+
+Question2:
+In the project, what are the crime categories used to define violent recidivism?
+  Answer2: 
+  1.	murder,
+  2.	non-negligent manslaughter
+  3.	rape
+  4.	robbery
+  5.	aggravated assault
+  6.	gang violence
+
+Question3:
+what is the score range (in numeric) of these categories:
+⦁	Low
+⦁	Medium
+⦁	High
+
+  Answer3:
+  ⦁	Low: 1-4
+  ⦁	Medium: 5-8 
+  ⦁	High: 8-10
+
+Question4:
+What is this R script trying to find out ?
+ 
+  Answer4:
+  There is a positive and weak (20%) correlation between length_of_stay and decile_score.
+
+Question5:
+Which statements are correct:
+a.	Black defendants are more likely to receive a higher COMPAS score compare to white defendants.
+b.	Men are more likely to receive a higher COMPAS score compare to women.
+c.	Defendants under 25 are likely to get a lesser COMPAS score compare to older age
+
+  Answer5:
+  a. True
+  b. False
+  c. False
+
+Question6:
+What is Cox-ph
+
+  Answer6:
+  http://www.sthda.com/english/wiki/cox-proportional-hazards-model
+  Cox-ph is a univariate or multivariate linear regression model for the analysis of patient's survival rate over time
+
+Question7:
+During your data analysis, what are 3 biases discovered in COMPAS scoring system 
+
+  Answer7:
+  Age, Race and Gender
+
+Question8:
+Define the IRAC components of this project (COMPAS algorithm in predicting recidivism):
+
+  Answer8:
+    Issue - A case question usually presented to the court with a general statement of facts in without any conclusive meaning or assumption of guilt 
+    Rule - The applicable law used by the court to make decision
+    Analysis - Court briefing of facts and arguments presented, rules interpreted, relevancy determined to arrive at a conclusion
+    Conclusion - States the court's ultimate findings and conclusion of the case
+
+Question9:
+In the Risk of Violent Recidivism, Black defendants are twice as likely to be false positives for a Higher violent score than white defendants.  Given this result below, how to get the value twice
+
+  Answer9:
+  Black's False Positive score is 38.14 which is approximately two times that of White's score of 18.46
+
+Question10:
+In the Gender differences in Compas scores below, what the number 730 represents?
+ 
+  Answer10:
+  730 represents two years
+
